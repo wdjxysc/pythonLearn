@@ -136,52 +136,5 @@ print("all up sum:{}".format(filter_stock_up_sum(stock_dict)))
 print("all down sum:{}".format(filter_stock_down_sum(stock_dict)))
 
 
-# 面向对象
-# 类
-from collections import namedtuple
-from collections import OrderedDict
-class StockTradeDays(object):
-    def __init__(self, price_array, start_date, date_array=None):
-        #私有价格序列
-        self.__price_array = price_array
-        #私有日期序列
-        self.__date_array = date_array
-        #私有涨幅序列
-        self.__date_change = self.__init_change()
-    def __init_change(self):
-        """
-        从price_array生成change_array
-        :return:
-        """
-        price_float_array = [float(price_str) for price_str in self.__price_array]
-        pp_array = [(price1, price2) for price1, price2 in zip(price_float_array[:-1], price_float_array[1:])]
-        change_array = list(map(
-            lambda pp: reduce(lambda a, b: round((b-a)/a, 3), pp),
-            pp_array
-        ))
-        # list insert()插入数据 将第一天的涨跌幅设为0
-        change_array.insert(0, 0)
-        return change_array
-    def _init_days(self, start_date, date_array):
-        """
-        protect 方法,
-        :param start_date: 初始日期
-        :param date_array: 给定日期序列
-        :return:
-        """
-        if date_array is None:
-            # 由start_date和self.__price_array来确定日期序列
-            date_array = [str(start_date + ind) for ind in enumerate(self.__price_array)]
-        else:
-            # 稍后的内容会使用外部直接设置的方式
-            # 如果外面设置了date_array,就直接转换str类型组成新的date_array
-            date_array = [str(date) for date in date_array]
-        return date_array
-    def _init_stock_dict(self):
-        """
-        使用namedtuple, OrderedDict将结果合并
-        :return:
-        """
-        stock_namedtuple = namedtuple('stock', ('date', 'price', 'change'))
-        # 使用已被赋值的__date_array等进行OrderedDict的组装
+
 
