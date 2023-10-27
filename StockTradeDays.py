@@ -65,8 +65,7 @@ class StockTradeDays(object):
         # Python中的三目表达式的写法
         filter_func = (lambda day:day.change > 0) if want_up else (lambda day:day.change < 0)
         # 使用filter_func作为筛选函数
-        want_day = filter_func(self.stock_dict[0])
-        want_days = filter(filter_func, self.stock_dict.values())
+        want_days = list(filter(filter_func, self.stock_dict.values()))
         if not want_calc_sum:
             return want_days
         # 需要计算涨跌幅和
