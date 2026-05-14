@@ -22,11 +22,14 @@ def build_parser():
     parser = argparse.ArgumentParser(description="Generate or edit an image with FLUX.2 klein 4B.")
     parser.add_argument("prompt", help="Text prompt, for example: Turn this cat into a dog")
     parser.add_argument("--input", "-i", nargs="+", help="Optional local paths or URLs of images to edit")
+    parser.add_argument("--clothing-ref", help="Reference image path for clothing style or outfit")
+    parser.add_argument("--mask", help="Optional mask image path for the clothing region (white = edit area, black = keep original)")
     parser.add_argument("--output", "-o", default=str(DEFAULT_OUTPUT), help="Output image path")
     parser.add_argument("--height", type=int, default=96, help="Generated image height when no input image is used")
     parser.add_argument("--width", type=int, default=96, help="Generated image width when no input image is used")
+    parser.add_argument("--scale", type=float, help="Scale factor for input images, e.g. 0.5 for 50% of original size")
     parser.add_argument("--steps", type=int, default=4, help="Number of inference steps")
-    parser.add_argument("--seed", type=int, default=0, help="Random seed")
+    parser.add_argument("--seed", type=int, default=-1, help="Random seed (-1 for random seeds, >=0 for fixed seed)")
     parser.add_argument("--num-images", "-n", type=int, default=1, help="Number of images to generate")
     return parser
 
@@ -102,11 +105,23 @@ def generate_filename_from_prompt(prompt):
     return filename
 
 
-def numbered_output_path(output_path, index):
+def numbered_output_path(output_path, index, seed):
+    stem = output_path.stem
+    suffix = output_path.suffix
     if index == 0:
-        return output_path
+        return output_path.with_name(f"{stem}_{seed}{suffix}")
+    else:
+        return output_path.with_name(f"{stem}_{index}_{seed}{suffix}")
 
-    return output_path.with_name(f"{output_path.stem}_{index + 1}{output_path.suffix}")
+
+def save_output_image(image, output_path):
+    output_path = Path(output_path)
+    if output_path.suffix.lower() in {".jpg", ".jpeg"}:
+        if image.mode in ("RGBA", "LA"):
+            image = image.convert("RGB")
+        image.save(output_path, quality=85)
+    else:
+        image.save(output_path)
 
 
 def main():
@@ -124,15 +139,59 @@ def main():
     else:
         pipe.to(device)
 
+    prompt = args.prompt
+    if args.clothing_ref:
+        if not args.input:
+            raise ValueError("--clothing-ref requires --input to specify the source person image")
+        prompt = f"{prompt}，根据参考服装图片换装，包括袜子" if prompt else "根据参考服装图片换装，包括袜子"
+
     call_args = {
-        "prompt": args.prompt,
+        "prompt": prompt,
         "num_inference_steps": args.steps,
     }
 
     if args.input:
+        from PIL import Image
         images = [load_image(input_path) for input_path in args.input]
+        
+        # 计算目标尺寸
+        target_width, target_height = None, None
+        if args.scale:
+            # 按比例缩放
+            first_img = images[0]
+            target_width = int(first_img.width * args.scale)
+            target_height = int(first_img.height * args.scale)
+        elif args.width != 96 or args.height != 96:
+            # 使用指定的绝对尺寸
+            target_width, target_height = args.width, args.height
+        
+        # 如果有目标尺寸，resize 输入图像
+        if target_width is not None and target_height is not None:
+            resized_images = []
+            for img in images:
+                resized_img = img.resize((target_width, target_height), Image.LANCZOS)
+                resized_images.append(resized_img)
+            images = resized_images
+        
+        if args.clothing_ref:
+            clothing_ref_image = load_image(args.clothing_ref)
+            # 使用相同的目标尺寸 resize 参考图像
+            if target_width is not None and target_height is not None:
+                clothing_ref_image = clothing_ref_image.resize((target_width, target_height), Image.LANCZOS)
+            images.append(clothing_ref_image)
+        
         call_args["image"] = images if len(images) > 1 else images[0]
+        
+        if args.mask:
+            mask_image = load_image(args.mask)
+            # 使用相同的目标尺寸 resize mask
+            if target_width is not None and target_height is not None:
+                mask_image = mask_image.resize((target_width, target_height), Image.LANCZOS)
+            call_args["mask"] = mask_image
     else:
+        # 没有输入图像时，生成新图
+        if args.scale:
+            raise ValueError("--scale only works with --input images")
         call_args.update({
             "height": args.height,
             "width": args.width,
@@ -149,12 +208,18 @@ def main():
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     for index in range(args.num_images):
+        import random
+        if args.seed == -1:
+            current_seed = random.randint(0, 2**32 - 1)
+        else:
+            current_seed = args.seed + index
+        
         image_args = dict(call_args)
-        image_args["generator"] = torch.Generator(device=device).manual_seed(args.seed + index)
+        image_args["generator"] = torch.Generator(device=device).manual_seed(current_seed)
 
         image = pipe(**image_args).images[0]
-        current_output_path = numbered_output_path(output_path, index)
-        image.save(current_output_path)
+        current_output_path = numbered_output_path(output_path, index, current_seed)
+        save_output_image(image, current_output_path)
         print(f"Saved image to {current_output_path}")
 
 
